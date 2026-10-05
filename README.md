@@ -77,10 +77,37 @@ and heartbeats are deduplicated; a failed POST is retried at most every 5 s.
 The initial send is not delayed by lookups: the cover is patched in with a
 second send once resolved.
 
-## Debug workflow (local worker)
+## Debug workflow
 
-`cliamp.http` blocks loopback addresses, so the plugin cannot reach
-`wrangler dev` directly. `watcher.sh` bridges the gap:
+### Option A: Tailscale (no watcher, recommended)
+
+`cliamp.http` blocks loopback and RFC1918 addresses, but Tailscale's CGNAT
+range (`100.64.0.0/10`) passes the guard (verified against cliamp's
+`ssrfGuard`: it only checks `IsLoopback`, `IsPrivate`, `IsLinkLocalUnicast`,
+`IsLinkLocalMulticast`, `IsMulticast`, `IsUnspecified`). So the plugin can
+POST to the local worker through the tailnet as if it were production:
+
+```sh
+# Worker listening on all interfaces (wrangler dev binds 127.0.0.1 by default)
+cd ~/Repos/Axenide/web/worker && wrangler dev --ip 0.0.0.0
+```
+
+```toml
+[plugins.axworker]
+worker_url = "http://<tailscale-ip>:8787"   # e.g. http://100.88.157.122:8787
+secret = "devsecret"                        # matches worker/.dev.vars
+```
+
+A MagicDNS name also works as long as Tailscale DNS is active in the system
+resolver: the name (e.g. `http://myhost:8787`) resolves to the node's `100.x`
+address, which passes the guard. Use the literal IP if MagicDNS is disabled.
+
+No `debug` flag, no watcher. The widget can be checked against `zola serve`
+(CORS already allows `localhost:1111`, which may fetch the tailnet URL).
+
+### Option B: state file + watcher
+
+`cliamp.http` cannot reach `localhost`, so `watcher.sh` bridges the gap:
 
 ```sh
 # Terminal 1: the worker
@@ -91,10 +118,13 @@ cd ~/Repos/Axenide/web/worker && wrangler dev
 ./watcher.sh
 ```
 
-With `debug = true` the plugin writes each payload to
-`~/.local/share/cliamp/axworker-state.json`; the watcher POSTs it to
-`http://localhost:8787/update` with `Bearer devsecret`. The site widget can
-then be checked against `zola serve` (CORS already allows `localhost:1111`).
+```toml
+[plugins.axworker]
+debug = true
+```
+
+The plugin writes each payload to `~/.local/share/cliamp/axworker-state.json`;
+the watcher POSTs it to `http://localhost:8787/update` with `Bearer devsecret`.
 
 Useful diagnostics:
 
