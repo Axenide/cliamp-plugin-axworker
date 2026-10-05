@@ -14,9 +14,6 @@ with a Deezer fallback (cached in `cliamp.store`).
 
 ## Install
 
-The repo must be named `cliamp-plugin-axworker` on GitHub for the install
-convention. Then:
-
 ```sh
 cliamp plugins install Axenide/cliamp-plugin-axworker
 cliamp plugins trust axworker
