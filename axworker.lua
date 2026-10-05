@@ -150,7 +150,7 @@ local function apply_cover(key, found)
 	end)
 end
 
-local function youtube_cover(path)
+local function youtube_id(path)
 	if type(path) ~= "string" then
 		return nil
 	end
@@ -161,21 +161,13 @@ local function youtube_cover(path)
 		"/embed/([%w%-_]+)",
 		"/live/([%w%-_]+)",
 	}
-	local id
 	for _, pat in ipairs(patterns) do
-		id = path:match(pat)
-		if id then
-			break
+		local id = path:match(pat)
+		if id and #id >= 11 then
+			return id
 		end
 	end
-	if not id or #id < 11 then
-		return nil
-	end
-	local url = path
-	if url:sub(1, 4) ~= "http" then
-		url = "https://" .. url
-	end
-	return { cover = "https://i.ytimg.com/vi/" .. id .. "/hqdefault.jpg", url = url }
+	return nil
 end
 
 local function build_term(artist, album, title)
@@ -242,9 +234,51 @@ local function resolve_cover()
 		return
 	end
 
-	local yt = youtube_cover(current.path)
-	if yt then
-		apply_cover(key, yt)
+	local yt_id = youtube_id(current.path)
+	if yt_id then
+		local cache_key = "yt:" .. yt_id
+		local cached = cache.map[cache_key]
+		if type(cached) == "table" then
+			apply_cover(key, cached)
+			return
+		end
+
+		local video_url = current.path
+		if video_url:sub(1, 4) ~= "http" then
+			video_url = "https://" .. video_url
+		end
+
+		local candidates = {
+			"https://i.ytimg.com/vi/" .. yt_id .. "/maxresdefault.jpg",
+			"https://i.ytimg.com/vi/" .. yt_id .. "/hq720.jpg",
+		}
+
+		local probe
+		probe = function(i)
+			if current.key ~= key then
+				return
+			end
+			if i <= #candidates then
+				local body, status = cliamp.http.get(candidates[i])
+				if status == 200 and type(body) == "string" and #body > 0 then
+					local found = { cover = candidates[i], url = video_url }
+					cache_set(cache_key, found)
+					apply_cover(key, found)
+					return
+				end
+				cliamp.timer.after(0, function()
+					probe(i + 1)
+				end)
+				return
+			end
+			local found = { cover = "https://i.ytimg.com/vi/" .. yt_id .. "/mqdefault.jpg", url = video_url }
+			cache_set(cache_key, found)
+			apply_cover(key, found)
+		end
+
+		cliamp.timer.after(0.1, function()
+			probe(1)
+		end)
 		return
 	end
 

@@ -179,7 +179,13 @@ local function run_timers()
   return ran
 end
 
-local function last_post() return http_calls[#http_calls] end
+local function last_post()
+	for i = #http_calls, 1, -1 do
+		if http_calls[i].opts then
+			return http_calls[i]
+		end
+	end
+end
 local function last_file() 
   for path, content in pairs(files) do return path, content end
 end
@@ -217,17 +223,35 @@ handlers["playback.state"]({ status = "playing", title = "Everlong", artist = "F
 assert(last_post().opts.json.playing == true, "resume sends true")
 print("== pause/resume OK")
 
--- 4. YouTube track: thumbnail derived from ID, no external lookup
+-- 4. YouTube track: probe maxres/hq720 (fail via empty stubs) -> mqdefault fallback
 http_calls = {}
 track_state.is_live = false
 handlers["track.change"]({ title = "Some YT Song", artist = "", album = "", path = "https://www.youtube.com/watch?v=dQw4w9WgXcQ", duration = 212, stream = true })
 assert(last_post().opts.json.playing == true)
 run_timers()
 assert(#timers == 0, "no timers for youtube")
-assert(#http_calls == 2, "initial send + cover re-push for youtube, got " .. #http_calls)
-assert(last_post().opts.json.coverUrl == "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg", "yt thumbnail")
+assert(#http_calls == 4, "initial POST + 2 failed probes + re-push, got " .. #http_calls)
+assert(http_calls[2].url == "https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg", "probes maxres first")
+assert(http_calls[3].url == "https://i.ytimg.com/vi/dQw4w9WgXcQ/hq720.jpg", "then hq720")
+assert(last_post().opts.json.coverUrl == "https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg", "mqdefault fallback (16:9, no bars)")
 assert(last_post().opts.json.url == "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "yt url")
-print("== youtube cover OK")
+print("== youtube cover fallback OK")
+
+-- 4b. YouTube maxres available -> picked, and cached (repeat play = no probes)
+http_calls = {}
+http_stub["https://i.ytimg.com/vi/aaaaaaaaaaa/maxresdefault.jpg"] = { status = 200, body = "JPEGDATA" }
+handlers["track.change"]({ title = "HD Song", artist = "", path = "https://www.youtube.com/watch?v=aaaaaaaaaaa" })
+run_timers()
+assert(#http_calls == 3, "initial POST + 1 probe + re-push, got " .. #http_calls)
+assert(last_post().opts.json.coverUrl == "https://i.ytimg.com/vi/aaaaaaaaaaa/maxresdefault.jpg", "maxres picked")
+http_calls = {}
+handlers["track.change"]({ title = "HD Song", artist = "", path = "https://www.youtube.com/watch?v=aaaaaaaaaaa" })
+run_timers()
+local gets = 0
+for _, c in ipairs(http_calls) do if c.method == "GET" then gets = gets + 1 end end
+assert(gets == 0, "yt result cached, got " .. gets .. " GETs")
+assert(last_post().opts.json.coverUrl == "https://i.ytimg.com/vi/aaaaaaaaaaa/maxresdefault.jpg", "cached maxres applied")
+print("== youtube maxres + cache OK")
 
 -- 5. youtu.be and music.youtube.com variants
 local yid = youtube_cover_id_test or nil
@@ -235,11 +259,11 @@ local yid = youtube_cover_id_test or nil
 http_calls = {}
 handlers["track.change"]({ title = "YTM", artist = "", path = "https://music.youtube.com/watch?v=abc123def45&list=x" })
 run_timers()
-assert(last_post().opts.json.coverUrl == "https://i.ytimg.com/vi/abc123def45/hqdefault.jpg", "ytmusic id")
+assert(last_post().opts.json.coverUrl == "https://i.ytimg.com/vi/abc123def45/mqdefault.jpg", "ytmusic id")
 http_calls = {}
 handlers["track.change"]({ title = "Shorts", artist = "", path = "https://youtube.com/shorts/abcdefghijk?feat=x" })
 run_timers()
-assert(last_post().opts.json.coverUrl == "https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg", "shorts id")
+assert(last_post().opts.json.coverUrl == "https://i.ytimg.com/vi/abcdefghijk/mqdefault.jpg", "shorts id")
 print("== youtube url variants OK")
 
 -- 6. Live radio: no cover lookup
