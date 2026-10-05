@@ -1,10 +1,10 @@
 # cliamp-plugin-axworker
 
-A personal [cliamp](https://github.com/bjarneo/cliamp) plugin that pushes
-now-playing metadata to a Cloudflare Worker, which feeds the player widget on
-my website. It also derives cover art: YouTube/YouTube Music thumbnails come
-from the video ID, and local files are resolved through the iTunes Search API
-with a Deezer fallback (cached in `cliamp.store`).
+A [cliamp](https://github.com/bjarneo/cliamp) plugin that pushes now-playing
+metadata to a Cloudflare Worker (e.g. to feed a player widget on a website).
+It also derives cover art: YouTube/YouTube Music thumbnails come from the
+video ID, and local files are resolved through the iTunes Search API with a
+Deezer fallback (cached in `cliamp.store`).
 
 ## Files
 
@@ -28,7 +28,7 @@ In `~/.config/cliamp/config.toml`:
 ```toml
 [plugins.axworker]
 # Production: POST to the deployed worker.
-worker_url = "https://now-playing.<account>.workers.dev"
+worker_url = "https://your-worker.example.workers.dev"
 secret = "<PLAYER_SECRET>"
 
 # Debug: write the payload to a state file instead (see watcher.sh).
@@ -85,13 +85,14 @@ range (`100.64.0.0/10`) passes the guard (verified against cliamp's
 POST to the local worker through the tailnet as if it were production:
 
 ```sh
-# Worker listening on all interfaces (wrangler dev binds 127.0.0.1 by default)
-cd ~/Repos/Axenide/web/worker && wrangler dev --ip 0.0.0.0
+# In your worker project: listen on all interfaces
+# (wrangler dev binds 127.0.0.1 by default)
+wrangler dev --ip 0.0.0.0
 ```
 
 ```toml
 [plugins.axworker]
-worker_url = "http://<tailscale-ip>:8787"   # e.g. http://100.88.157.122:8787
+worker_url = "http://<tailscale-ip>:8787"   # your node's 100.x.y.z address
 secret = "devsecret"                        # matches worker/.dev.vars
 ```
 
@@ -99,16 +100,13 @@ A MagicDNS name also works as long as Tailscale DNS is active in the system
 resolver: the name (e.g. `http://myhost:8787`) resolves to the node's `100.x`
 address, which passes the guard. Use the literal IP if MagicDNS is disabled.
 
-No `debug` flag, no watcher. The widget can be checked against `zola serve`
-(CORS already allows `localhost:1111`, which may fetch the tailnet URL).
-
 ### Option B: state file + watcher
 
 `cliamp.http` cannot reach `localhost`, so `watcher.sh` bridges the gap:
 
 ```sh
-# Terminal 1: the worker
-cd ~/Repos/Axenide/web/worker && wrangler dev
+# Terminal 1: the worker (in your worker project)
+wrangler dev
 
 # Terminal 2: the forwarder (env-overridable: AXWORKER_URL, AXWORKER_SECRET,
 # AXWORKER_STATE_FILE, AXWORKER_POLL)
@@ -121,19 +119,12 @@ debug = true
 ```
 
 The plugin writes each payload to `~/.local/share/cliamp/axworker-state.json`;
-the watcher POSTs it to `http://localhost:8787/update` with `Bearer devsecret`.
-
-Useful diagnostics:
-
-```sh
-cliamp plugins call axworker status   # current state, target, cache size
-tail -f ~/.config/cliamp/plugins.log
-```
+the watcher POSTs it to `http://localhost:8787/update` with `Bearer devsecret`
+(its defaults; override via the env vars above).
 
 ## Production
 
 ```sh
-cd ~/Repos/Axenide/web/worker
 wrangler deploy
 wrangler secret put PLAYER_SECRET
 ```
